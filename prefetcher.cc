@@ -1,10 +1,41 @@
+#include <string>
+#include <stdio.h>
+#include <iostream>
+#include <map>
 #include "interface.hh"
+#include "definitions.cc"
+
+#define SIGNED_COUNTER long long
+#define C(n) do { ++(theStats.theCounters[(#n)]); } while(0);
+#define S(n,v) do { (theStats.theCounters[(#n)])+=(v); } while(0);
+
+
+const int theBlockSize(64);
+
+const bool NoRotation = false;
+
+struct Stats
+{
+    std::map<std::string, long long> theCounters;
+    ~Stats() {
+        for(std::map<std::string, long long>::iterator
+                i=theCounters.begin();
+                i!=theCounters.end();
+                ++i) {
+            std::cerr << i->first << "," << i->second << std::endl;
+        }
+    }
+} theStats;
+
+#include "SMS.h"
+#include "MSHR.h"
 
 void prefetch_init(void){
-/* Called before any calls to prefetch_access. */
-/* This is the place to initialize data structures. */
    DPRINTF(HWPrefetch, "Initialized sequential-on-access prefetcher\n");
+    sms = new SMS();
+    mshrs = new MSHRs(16);
 }
+
 
 void prefetch_access(AccessStat stat){
 /* pf_addr is now an address within the _next_ cache block */
