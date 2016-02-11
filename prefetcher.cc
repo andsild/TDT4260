@@ -1,57 +1,293 @@
-#include <string>
+// *******************************************************************************
+// Multi-level Adaptive Sequential Tagged Prefetching
+// based on Performance Gradient Tracking
+// Ramos, Briz, Ibanez, Vinals
+// *******************************************************************************
+#ifndef SAMPLE_PREFETCHER_H
+#define SAMPLE_PREFETCHER_H
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <iostream>
-#include <map>
+
 #include "interface.hh"
-#include "definitions.cc"
-
-#define SIGNED_COUNTER long long
-#define C(n) do { ++(theStats.theCounters[(#n)]); } while(0);
-#define S(n,v) do { (theStats.theCounters[(#n)])+=(v); } while(0);
 
 
-const int theBlockSize(64);
+// *******************************************************************************
+//          SEQT (L2 Prefetcher)
+// *******************************************************************************
+void SEQT_cycle(Tick cycle, AccessStat *L2Data);
 
-const bool NoRotation = false;
+// SEQT Degree Automaton (SDA)
+Addr SDA_last_addr;
+char SDA_degree=0;
 
-struct Stats
-{
-    std::map<std::string, long long> theCounters;
-    ~Stats() {
-        for(std::map<std::string, long long>::iterator
-                i=theCounters.begin();
-                i!=theCounters.end();
-                ++i) {
-            std::cerr << i->first << "," << i->second << std::endl;
+
+// *******************************************************************************
+//          SEQTL1 (L1 Prefetcher)
+// *******************************************************************************
+// void SEQTL1_cycle(Tick cycle, PrefetchData_t *L1Data);
+
+// SEQT L1 Degree Automaton (SDA1)
+Addr SDA1_last_addr;
+char SDA1_degree=0;
+
+// *******************************************************************************
+//          MissStatusHandlingRegisters
+// *******************************************************************************
+typedef struct MSHR_entry MSHR_entry;
+struct MSHR_entry {
+    Addr addr;
+    char valid;
+};
+typedef struct MissStatusHandlingRegister MissStatusHandlingRegister;
+struct MissStatusHandlingRegister{
+    int size;
+    int tail;
+    int num;
+    int head;
+    MSHR_entry entry[32];
+};
+MissStatusHandlingRegister * PrefetchMissAddressFile1;
+MissStatusHandlingRegister * MissStatusHandlingRegisterD2;
+MissStatusHandlingRegister * PrefetchMissAddressFile2;
+
+void MissStatusHandlingRegister_ini (void);
+int MissStatusHandlingRegister_lookup (MissStatusHandlingRegister * MissStatusHandlingRegister, Tick cycle, Addr addr);   // if hit it returns 1
+void MissStatusHandlingRegister_insert (MissStatusHandlingRegister * MissStatusHandlingRegister, Tick cycle, Addr addr);  // if full, the oldest entry is deleted
+void MissStatusHandlingRegister_cycle (Tick cycle);               // it deletes the oldest entry if it hits on the cache (using GetPrefetchBit)
+
+// *******************************************************************************
+//          ADAPTIVE DEGREE (L2)
+// *******************************************************************************
+unsigned int AD_cycles=0;
+Tick AD_L1_accesses=0;
+Tick AD_last_L1_accesses=0;
+#define AD_interval (64*1024)
+#define AD_MAX_INDEX (13)   // number of different degrees
+int AD_degs[AD_MAX_INDEX]={0,1,2,3,4,6,8,12,16,24,32,48,64};
+int AD_deg_index=4;
+int AD_degree=4;
+char AD_state=0; // 0: increasing degree;  1: decreasing degree
+
+void AD_cycle(Tick cycle, AccessStat *L1Data);
+
+#endif
+
+
+//  Function that is called every cycle to issue prefetches should the
+//  prefetcher want to.  The arguments to the function are the current cycle,
+//  the demand requests to L1 and L2 cache.  Again, DO NOT change the prototype of this
+//  function.  You can change the body of the function by calling your necessary
+//  routines to invoke your prefetcher.
+//
+
+// DO NOT CHANGE THE PROTOTYPE
+void IssuePrefetches( Tick cycle, AccessStat *L1Data, AccessStat * L2Data )
+{    
+    // INSERT YOUR CHANGES IN HERE
+    MissStatusHandlingRegister_cycle(cycle);
+    AD_cycle(cycle, L1Data);
+    // SEQTL1_cycle(cycle, L1Data);
+    SEQT_cycle(cycle, L2Data);
+
+}
+
+// *******************************************************************************
+//          SEQT (L2 Prefetcher)
+// *******************************************************************************
+
+void SEQT_cycle(Tick cycle, AccessStat *L2Data){
+
+    // miss or "1st use" in L2? (considering demand and prefetch references)
+    if (cycle == L2Data->time && 
+            ((L2Data->miss == 1 
+              && !MissStatusHandlingRegister_lookup(MissStatusHandlingRegisterD2, cycle, L2Data->mem_addr)) 
+        || get_prefetch_bit(L2Data->mem_addr)==1)
+            )
+    {
+
+        if (L2Data->miss == 1)
+            MissStatusHandlingRegister_insert(MissStatusHandlingRegisterD2, cycle, L2Data->mem_addr);
+        else 
+        {
+            clear_prefetch_bit(L2Data->mem_addr);
+        }
+
+        if (AD_degree){
+            // program SDA
+            SDA_last_addr=L2Data->mem_addr;
+            SDA_degree=AD_degree; 
         }
     }
-} theStats;
 
-#include "SMS.h"
-#include "MSHR.h"
+    // the SDA generates 1 prefetch per cycle
+    if (SDA_degree){
+        Addr predicted_address= SDA_last_addr+0x40; 
 
-void prefetch_init(void){
-   DPRINTF(HWPrefetch, "Initialized sequential-on-access prefetcher\n");
-    sms = new SMS();
-    mshrs = new MSHRs(16);
+        // issue prefetch (if not filtered)
+        if (get_prefetch_bit(predicted_address)==-1){
+            if (!MissStatusHandlingRegister_lookup(PrefetchMissAddressFile2, cycle,predicted_address & 0xffff) && !MissStatusHandlingRegister_lookup(MissStatusHandlingRegisterD2, cycle,predicted_address)){
+                issue_prefetch(predicted_address);
+                MissStatusHandlingRegister_insert(PrefetchMissAddressFile2, cycle,predicted_address & 0xffff);
+            }
+        }
+        // program SDA
+        SDA_last_addr=predicted_address;
+        SDA_degree--;
+    }
+}
+
+// *******************************************************************************
+//          SEQTL1 (L1 Prefetcher)
+// *******************************************************************************
+// void SEQTL1_cycle(Tick cycle, AccessStat *L1Data){
+//     int i;
+//
+//     for (i=0; i<4; i++){
+//         // miss or "1st use" in L1?
+//         if (cycle == L1Data[i].LastRequestCycle && (L1Data[i].hit == 0 || GetPrefetchBit(0, L1Data[i].DataAddr)==1) ){
+//
+//             if (L1Data[i].hit == 1){
+//                 UnSetPrefetchBit(0, L1Data[i].DataAddr);
+//             }                                                       
+//
+//             // program SDA1
+//             SDA1_last_addr=L1Data[i].DataAddr;
+//             SDA1_degree=(L1Data[i].hit == 0 ? 1 : 4 ); 
+//         } //end if
+//     } //end for
+//
+//     // the SDA1 generates 1 prefetch per cycle
+//     if (SDA1_degree){
+//         Addr predicted_address= SDA1_last_addr+0x40; 
+//
+//         // issue prefetch (if not filtered)
+//         if (GetPrefetchBit(0, predicted_address)==-1){
+//             if (!MissStatusHandlingRegister_lookup(PrefetchMissAddressFile1, cycle,predicted_address & 0xffff)){       
+//                 if (IssueL1Prefetch(cycle,predicted_address)==0){;
+//                     MissStatusHandlingRegister_insert(PrefetchMissAddressFile1, cycle,predicted_address & 0xffff);         
+//                 }
+//             }     
+//         }
+//         // program next prefetch for the next cycle
+//         SDA1_last_addr=predicted_address;
+//         SDA1_degree--;
+//     }
+// }
+
+
+void MissStatusHandlingRegister_ini (void){
+    PrefetchMissAddressFile1=(MissStatusHandlingRegister *) calloc(1, sizeof(MissStatusHandlingRegister));
+    PrefetchMissAddressFile1->size=32;
+    MissStatusHandlingRegisterD2=(MissStatusHandlingRegister *) calloc(1, sizeof(MissStatusHandlingRegister));
+    MissStatusHandlingRegisterD2->size=16;
+    PrefetchMissAddressFile2=(MissStatusHandlingRegister *) calloc(1, sizeof(MissStatusHandlingRegister));
+    PrefetchMissAddressFile2->size=32;
+}
+int MissStatusHandlingRegister_lookup (MissStatusHandlingRegister * MissStatusHandlingRegister, Tick cycle, Addr addr){
+    int i;
+    Addr MASK = 0x3f; 
+
+    if (!MissStatusHandlingRegister->size || !MissStatusHandlingRegister->num)
+        return 0;
+
+    for (i=0; i < MissStatusHandlingRegister->size; i++){
+        if (MissStatusHandlingRegister->entry[i].valid && (MissStatusHandlingRegister->entry[i].addr == (addr & ~MASK)) ){
+            return 1;
+        }
+    }
+    return 0;
+}
+void MissStatusHandlingRegister_insert (MissStatusHandlingRegister * MissStatusHandlingRegister, Tick cycle, Addr addr){
+    Addr MASK = 0x3f; 
+
+    if (!MissStatusHandlingRegister->size || !addr)
+        return;
+
+    MissStatusHandlingRegister->entry[MissStatusHandlingRegister->tail].valid=1;
+    MissStatusHandlingRegister->entry[MissStatusHandlingRegister->tail].addr= (addr & ~MASK);
+    MissStatusHandlingRegister->tail=(MissStatusHandlingRegister->tail+1)%MissStatusHandlingRegister->size;
+
+    if (MissStatusHandlingRegister->num<MissStatusHandlingRegister->size)
+        MissStatusHandlingRegister->num++;
+    else
+        MissStatusHandlingRegister->head=MissStatusHandlingRegister->tail;
+}
+
+void MissStatusHandlingRegister_cycle (Tick cycle){
+
+    if (PrefetchMissAddressFile1->num && (get_prefetch_bit(PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].addr)!= -1) ){
+        PrefetchMissAddressFile1->num--;
+        PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].valid=0;
+        PrefetchMissAddressFile1->head=(PrefetchMissAddressFile1->head+1)%PrefetchMissAddressFile1->size;
+    }
+
+    if (MissStatusHandlingRegisterD2->num && (get_prefetch_bit(MissStatusHandlingRegisterD2->entry[MissStatusHandlingRegisterD2->head].addr)!= -1) ){
+        MissStatusHandlingRegisterD2->num--;
+        MissStatusHandlingRegisterD2->entry[MissStatusHandlingRegisterD2->head].valid=0;
+        MissStatusHandlingRegisterD2->head=(MissStatusHandlingRegisterD2->head+1)%MissStatusHandlingRegisterD2->size;
+    }
+    
+    if (PrefetchMissAddressFile2->num && (get_prefetch_bit(PrefetchMissAddressFile2->entry[PrefetchMissAddressFile2->head].addr)!= -1) ){
+        PrefetchMissAddressFile2->num--;
+        PrefetchMissAddressFile2->entry[PrefetchMissAddressFile2->head].valid=0;
+        PrefetchMissAddressFile2->head=(PrefetchMissAddressFile2->head+1)%PrefetchMissAddressFile2->size;
+    }
+}
+
+// *******************************************************************************
+//          ADAPTIVE DEGREE (L2)
+// *******************************************************************************
+
+void AD_cycle(Tick cycle, AccessStat *L1Data){
+    int i;
+
+    AD_cycles++;
+    for(i = 0; i < 4; i++) {
+        // if(cycle == L1Data[i].LastRequestCycle) 
+        //     AD_L1_accesses++;
+    }
+
+    if (AD_cycles>AD_interval){
+        AD_cycles=0;
+        if (AD_L1_accesses<AD_last_L1_accesses){
+            AD_state=!AD_state;
+        }
+        if (!AD_state) {
+            if (AD_deg_index<AD_MAX_INDEX-1) AD_deg_index++; 
+        } 
+        else {
+            if (AD_deg_index>0) AD_deg_index--; 
+        }
+        AD_degree=AD_degs[AD_deg_index];
+        AD_last_L1_accesses=AD_L1_accesses;
+        AD_L1_accesses=0;
+    }
 }
 
 
-void prefetch_access(AccessStat stat){
-/* pf_addr is now an address within the _next_ cache block */
-   Addr pf_addr = stat.mem_addr + BLOCK_SIZE;
-/*
-* Issue a prefetch request if a demand miss occured,
-* and the block is not already in cache.
-*/
-   if (stat.miss && !in_cache(pf_addr)) {
-      issue_prefetch(pf_addr);
+void prefetch_init(void){
+    /* Called before any calls to prefetch_access. */
+    /* This is the place to initialize data structures. */
+    MissStatusHandlingRegister_ini();
+}
 
-   }
+void prefetch_access(AccessStat stat){
+    /* pf_addr is now an address within the _next_ cache block */
+    Addr pf_addr = stat.mem_addr + BLOCK_SIZE;
+    /*
+     * Issue a prefetch request if a demand miss occured,
+     * and the block is not already in cache.
+     */
+    if (stat.miss && !in_cache(pf_addr)) {
+        issue_prefetch(pf_addr);
+
+    }
 }
 
 void prefetch_complete(Addr addr) {
-/*
-* Called when a block requested by the prefetcher has been loaded.
-*/
+    /*
+     * Called when a block requested by the prefetcher has been loaded.
+     */
 }
