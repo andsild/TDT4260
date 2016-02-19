@@ -88,6 +88,7 @@ void SequentialTaggingL2(AccessStat *L2Data)
                 && !MissStatusHandlingRegister_lookup(MissStatusHandlingRegisterD2,predicted_address))
             {
                 issue_prefetch(predicted_address);
+                set_prefetch_bit(predicted_address);
                 MissStatusHandlingRegister_insert(PrefetchMissAddressFile2,predicted_address & 0xffff);
             }
         }
@@ -99,10 +100,9 @@ void SequentialTaggingL2(AccessStat *L2Data)
 
 void SequentialTaggingL1_cycle(AccessStat *L1Data)
 {
-
     if (L1Data->miss == 1 || get_prefetch_bit(L1Data->mem_addr))
     {
-        if (L1Data->miss == 1)
+        if (L1Data->miss == 0)
             clear_prefetch_bit(L1Data->mem_addr);
 
         // program SDA1
@@ -117,10 +117,10 @@ void SequentialTaggingL1_cycle(AccessStat *L1Data)
 
         // issue prefetch (if not filtered)
         if (!get_prefetch_bit(predicted_address))
-            if (!MissStatusHandlingRegister_lookup(
-                        PrefetchMissAddressFile1, predicted_address & 0xffff))
+            if (!in_mshr_queue(predicted_address & 0xffff))
             {       
                 issue_prefetch(predicted_address);
+                set_prefetch_bit(predicted_address);
                 MissStatusHandlingRegister_insert(PrefetchMissAddressFile1,
                                                   predicted_address & 0xffff);         
             }     
@@ -176,8 +176,8 @@ void MissStatusHandlingRegister_insert (MissStatusHandlingRegister * MissStatusH
 void MissStatusHandlingRegister_cycle () 
 {
     /* If we have entries and head has a `prefetched` page */
-    if (PrefetchMissAddressFile1->num 
-        && (get_prefetch_bit(PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].addr) != -1) )
+    if (PrefetchMissAddressFile1->num && 
+            (get_prefetch_bit(PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].addr) != -1) )
     {
         /* invalidate head (and remember to update num) */
         PrefetchMissAddressFile1->num--;
@@ -242,11 +242,12 @@ void prefetch_init(void){
     MissStatusHandlingRegister_ini();
 }
 
+// Function that is called when L2 memory is requested from L1
 void prefetch_access(AccessStat stat){
     //  Function that is called every cycle to issue prefetches should the
     //  prefetcher want to.  The arguments to the function are the current cycle,
     //  the demand requests to L1 and L2 cache. 
-    MissStatusHandlingRegister_cycle();
+    MissStatusHandlingRegister_cycle(); 
     struct AccessStat *ptr = &stat;
     AD_cycle(ptr);
     SequentialTaggingL1_cycle(ptr);
