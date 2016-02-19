@@ -66,7 +66,10 @@ void SequentialTaggingL2(AccessStat *L2Data)
         || get_prefetch_bit(L2Data->mem_addr)==1)
     {
         if (L2Data->miss == 1)
+        {
+            set_prefetch_bit(L2Data->mem_addr);
             MissStatusHandlingRegister_insert(MissStatusHandlingRegisterD2, L2Data->mem_addr);
+        }
         else 
             clear_prefetch_bit(L2Data->mem_addr);
     }
@@ -105,7 +108,7 @@ void SequentialTaggingL1_cycle(AccessStat *L1Data)
         if (L1Data->miss == 0)
             clear_prefetch_bit(L1Data->mem_addr);
 
-        // program SDA1
+        // program SD
         SDA1_last_addr=L1Data->mem_addr;
         SDA1_degree=(L1Data->miss == 1 ? 1 : 4 ); 
     } //end if
@@ -181,10 +184,10 @@ void MissStatusHandlingRegister_cycle ()
     {
         /* invalidate head (and remember to update num) */
         PrefetchMissAddressFile1->num--;
-        PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].valid=0; 
         /* Point head to the next entry
             Modulus: if head points outside of scope, then point to beginning 
         */
+        PrefetchMissAddressFile1->entry[PrefetchMissAddressFile1->head].valid=0; 
         PrefetchMissAddressFile1->head=(PrefetchMissAddressFile1->head+1)%PrefetchMissAddressFile1->size;
     }
 
