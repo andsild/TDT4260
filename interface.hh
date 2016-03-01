@@ -67,8 +67,6 @@ extern "C" void prefetch_access(AccessStat stat);
  */
 extern "C" void prefetch_complete(Addr addr);
 
-
-
 /* Functions callable from the user-defined prefetcher. */
 
 /*
@@ -76,7 +74,6 @@ extern "C" void prefetch_complete(Addr addr);
  * a prefetch for address addr should be added to the prefetch queue.
  */
 extern "C" void issue_prefetch(Addr addr);
-
 
 /* Is the prefetch bit set for the cache block corresponding to addr? */
 extern "C" int get_prefetch_bit(Addr addr);
@@ -86,8 +83,6 @@ extern "C" void set_prefetch_bit(Addr addr);
 
 /* Clear the prefetch bit for the cache block corresponding to addr. */
 extern "C" void clear_prefetch_bit(Addr addr);
-
-
 
 /* Is this address already in the cache? */
 extern "C" int in_cache(Addr addr);
