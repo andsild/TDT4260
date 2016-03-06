@@ -7,39 +7,27 @@ if expand('%') == '' && !&modified && line('$') <= 1 && getline(1) == ''
   let s:wipebuf = bufnr('%')
 endif
 set shortmess=aoO
-badd +294 prefetcher.cc
+badd +75 prefetcher.cc
 badd +1 test_prefetcher.cc
 badd +64 interface.hh
-badd +41 ~/Descargas/05_v1_sample_prefetcher.cpp
+badd +1 ~/Descargas/05_v1_sample_prefetcher.cpp
 badd +234 ~/Descargas/PREF_KIT/src/prefetch/sample_prefetcher.h
-badd +0 ~/Descargas/PREF_KIT/src/prefetch/interface.h
+badd +1 ~/Descargas/PREF_KIT/src/prefetch/interface.h
 badd +2 \[unite]\ -\ tag
+badd +0 ClangDiagnostics@1
 argglobal
 silent! argdel *
 argadd prefetcher.cc
 edit prefetcher.cc
 set splitbelow splitright
 wincmd _ | wincmd |
-split
-1wincmd k
-wincmd _ | wincmd |
 vsplit
 1wincmd h
-wincmd _ | wincmd |
-split
-1wincmd k
-wincmd w
-wincmd w
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe '1resize ' . ((&lines * 39 + 26) / 53)
-exe 'vert 1resize ' . ((&columns * 95 + 95) / 191)
-exe '2resize ' . ((&lines * 3 + 26) / 53)
-exe 'vert 2resize ' . ((&columns * 95 + 95) / 191)
-exe '3resize ' . ((&lines * 43 + 26) / 53)
-exe 'vert 3resize ' . ((&columns * 95 + 95) / 191)
-exe '4resize ' . ((&lines * 5 + 26) / 53)
+exe 'vert 1resize ' . ((&columns * 79 + 79) / 159)
+exe 'vert 2resize ' . ((&columns * 79 + 79) / 159)
 argglobal
 setlocal fdm=indent
 setlocal fde=0
@@ -49,44 +37,15 @@ setlocal fdl=7
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-277
-normal! zo
-294
-normal! zo
-298
-normal! zo
-302
-normal! zo
-357
-normal! zo
-357
-normal! zc
-383
-normal! zo
-399
-normal! zo
-let s:l = 75 - ((8 * winheight(0) + 19) / 39)
+let s:l = 390 - ((19 * winheight(0) + 19) / 39)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
-75
-normal! 06|
+390
+normal! 0
 wincmd w
 argglobal
-enew
-file ClangDiagnostics@1
-setlocal fdm=indent
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=99
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
-lcd /mnt/virtbox/prefetcher
-wincmd w
-argglobal
-edit /mnt/virtbox/prefetcher/prefetcher.cc
+edit prefetcher.cc
 setlocal fdm=indent
 setlocal fde=0
 setlocal fmr={{{,}}}
@@ -95,34 +54,22 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-357
+326
 normal! zo
-let s:l = 45 - ((28 * winheight(0) + 21) / 43)
+333
+normal! zo
+342
+normal! zo
+let s:l = 45 - ((31 * winheight(0) + 19) / 39)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
 45
 normal! 0
-wincmd w
-argglobal
-enew
-setlocal fdm=manual
-setlocal fde=0
-setlocal fmr={{{,}}}
-setlocal fdi=#
-setlocal fdl=99
-setlocal fml=1
-setlocal fdn=20
-setlocal nofen
 lcd /mnt/virtbox/prefetcher
 wincmd w
-exe '1resize ' . ((&lines * 39 + 26) / 53)
-exe 'vert 1resize ' . ((&columns * 95 + 95) / 191)
-exe '2resize ' . ((&lines * 3 + 26) / 53)
-exe 'vert 2resize ' . ((&columns * 95 + 95) / 191)
-exe '3resize ' . ((&lines * 43 + 26) / 53)
-exe 'vert 3resize ' . ((&columns * 95 + 95) / 191)
-exe '4resize ' . ((&lines * 5 + 26) / 53)
+exe 'vert 1resize ' . ((&columns * 79 + 79) / 159)
+exe 'vert 2resize ' . ((&columns * 79 + 79) / 159)
 tabedit /mnt/virtbox/prefetcher/interface.hh
 set splitbelow splitright
 wincmd t
@@ -136,12 +83,13 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 67 - ((21 * winheight(0) + 24) / 49)
+let s:l = 67 - ((17 * winheight(0) + 19) / 39)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
 67
 normal! 02|
+lcd /mnt/virtbox/prefetcher
 tabedit ~/Descargas/05_v1_sample_prefetcher.cpp
 set splitbelow splitright
 wincmd _ | wincmd |
@@ -154,11 +102,11 @@ split
 wincmd w
 wincmd t
 set winheight=1 winwidth=1
-exe 'vert 1resize ' . ((&columns * 95 + 95) / 191)
-exe '2resize ' . ((&lines * 43 + 26) / 53)
-exe 'vert 2resize ' . ((&columns * 95 + 95) / 191)
-exe '3resize ' . ((&lines * 5 + 26) / 53)
-exe 'vert 3resize ' . ((&columns * 95 + 95) / 191)
+exe 'vert 1resize ' . ((&columns * 79 + 79) / 159)
+exe '2resize ' . ((&lines * 34 + 21) / 43)
+exe 'vert 2resize ' . ((&columns * 79 + 79) / 159)
+exe '3resize ' . ((&lines * 4 + 21) / 43)
+exe 'vert 3resize ' . ((&columns * 79 + 79) / 159)
 argglobal
 setlocal fdm=indent
 setlocal fde=0
@@ -168,12 +116,13 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 3 - ((2 * winheight(0) + 24) / 49)
+let s:l = 3 - ((2 * winheight(0) + 19) / 39)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
 3
 normal! 0
+lcd /mnt/virtbox/prefetcher
 wincmd w
 argglobal
 edit ~/Descargas/PREF_KIT/src/prefetch/interface.h
@@ -185,7 +134,7 @@ setlocal fdl=99
 setlocal fml=1
 setlocal fdn=20
 setlocal fen
-let s:l = 1 - ((0 * winheight(0) + 21) / 43)
+let s:l = 1 - ((0 * winheight(0) + 17) / 34)
 if s:l < 1 | let s:l = 1 | endif
 exe s:l
 normal! zt
@@ -205,11 +154,11 @@ setlocal fdn=20
 setlocal nofen
 lcd /mnt/virtbox/prefetcher
 wincmd w
-exe 'vert 1resize ' . ((&columns * 95 + 95) / 191)
-exe '2resize ' . ((&lines * 43 + 26) / 53)
-exe 'vert 2resize ' . ((&columns * 95 + 95) / 191)
-exe '3resize ' . ((&lines * 5 + 26) / 53)
-exe 'vert 3resize ' . ((&columns * 95 + 95) / 191)
+exe 'vert 1resize ' . ((&columns * 79 + 79) / 159)
+exe '2resize ' . ((&lines * 34 + 21) / 43)
+exe 'vert 2resize ' . ((&columns * 79 + 79) / 159)
+exe '3resize ' . ((&lines * 4 + 21) / 43)
+exe 'vert 3resize ' . ((&columns * 79 + 79) / 159)
 tabnext 1
 if exists('s:wipebuf') && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf

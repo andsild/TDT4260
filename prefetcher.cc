@@ -13,13 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "interface.h"  // Do NOT edit interface .h
+#include "interface.hh"
 
 
-// *******************************************************************************
-//          PDFCM (L2 Prefetcher)
-// *******************************************************************************
-// History Table (HT) and Delta Table (DT)
 #define PDFCM_HT_bits (8)
 #define PDFCM_HT_size (1 << PDFCM_HT_bits)
 #define PDFCM_HT_mask (PDFCM_HT_size - 1)
@@ -56,7 +52,7 @@ Addr PDFCM_predict_next (Addr addr, unsigned short *history,
                          unsigned short last_addr);   // used by the PDA to predict the next addresses
 unsigned short PDFCM_hash (unsigned short old_history,
                            short delta);                    // calculates the new hashed history of deltas
-void PDFCM_cycle(Tick cycle, AccessStat *L2Data);
+void PDFCM_cycle(AccessStat *L2Data);
 
 // PDFCM Degree Automaton (PDA)
 unsigned short PDA_history;
@@ -65,19 +61,11 @@ unsigned short PDA_last_addr;
 char PDA_degree=0;
 
 
-
-// *******************************************************************************
-//          SEQTL1 (L1 Prefetcher)
-// *******************************************************************************
-void SEQTL1_cycle(Tick cycle, AccessStat *L1Data);
-
+void SEQTL1_cycle(AccessStat *L1Data);
 // SEQT L1 Degree Automaton (SDA1)
-Addr SDA1_last_addr;
-char SDA1_degree=0;
+Addr SeqDegreeAuto_lastaddr;
+char SeqDegreeAuto_degree=0;
 
-// *******************************************************************************
-//          MSHRs
-// *******************************************************************************
 typedef struct MSHR_entry MSHR_entry;
 struct MSHR_entry
 {
@@ -98,16 +86,12 @@ MSHR * MSHRD2;
 MSHR * PMAF2;
 
 void MSHR_ini (void);
-int MSHR_lookup (MSHR * MSHR, Tick cycle, Addr addr);     // if hit it returns 1
-void MSHR_insert (MSHR * MSHR, Tick cycle,
+int MSHR_lookup (MSHR * MSHR, Addr addr);     // if hit it returns 1
+void MSHR_insert (MSHR * MSHR,
                   Addr addr);    // if full, the oldest entry is deleted
-void MSHR_cycle (Tick
-                 cycle);                // it deletes the oldest entry if it hits on the cache (using GetPrefetchBit)
+void MSHR_cycle ();                // it deletes the oldest entry if it hits on the cache (using GetPrefetchBit)
 
-// *******************************************************************************
-//          ADAPTIVE DEGREE (L2)
-// *******************************************************************************
-unsigned int AD_cycles=0;
+unsigned int AdaptiveDegree_Cycles=0;
 Tick AD_L1_accesses=0;
 Tick AD_last_L1_accesses=0;
 #define AD_interval (64*1024)
@@ -117,16 +101,7 @@ int AD_deg_index=4;
 int AD_degree=4;
 char AD_state=0; // 0: increasing degree;  1: decreasing degree
 
-void AD_cycle(Tick cycle, AccessStat *L1Data);
-
-// Multi-level PDFCM Adaptive Prefetching
-// based on Performance Gradient Tracking
-// BASIC RELEASE
-// Ramos, Briz, Ibanez, Vinals
-// *******************************************************************************
-// *******************************************************************************
-//          PDFCM (L2 Prefetcher)
-// *******************************************************************************
+void AdaptiveDegree_Cycle(AccessStat *L1Data);
 
 void PDFCM_ini (void)
 {
@@ -158,13 +133,9 @@ Addr PDFCM_update_and_predict (Addr pc, Addr addr, unsigned short *history)
     predicted_delta=PDFCM_DT[old_history].delta;
     actual_delta = (addr-old_last_addr) & MASK_16b;
     if (actual_delta==predicted_delta)
-    {
         if (count<3) count++;
-    }
     else
-    {
         if (count>0) count--;
-    }
     // compute new history
     new_last_addr = addr & MASK_16b;
     *history   = new_history   = PDFCM_hash(old_history, actual_delta);
@@ -207,115 +178,6 @@ unsigned short PDFCM_hash (unsigned short old_history, short delta)
     return shift ^ folded;
 }
 
-void PDFCM_cycle(Tick cycle, AccessStat *L2Data)
-{
-    Addr predicted_address;
-    unsigned short history=PDA_history;
-    // miss or "1st use" in L2? (considering only demand references)
-    if (cycle == L2Data->LastRequestCycle && !L2Data->LastRequestPrefetch &&
-            ((L2Data->hit == 0  && !MSHR_lookup(MSHRD2, cycle, L2Data->DataAddr)) ||
-             GetPrefetchBit(1, L2Data->DataAddr)==1)  )
-    {
-        if (L2Data->hit == 0)
-            MSHR_insert(MSHRD2, cycle, L2Data->DataAddr);
-        else
-            UnSetPrefetchBit(1, L2Data->DataAddr);
-        // update PDFCM tables, predict next missing address and get the new history
-        predicted_address = PDFCM_update_and_predict(L2Data->LastRequestAddr,
-                            L2Data->DataAddr, &history);
-        if (AD_degree)
-        {
-            // issue prefetch (if not filtered)
-            if (predicted_address && predicted_address!=L2Data->DataAddr &&
-                    GetPrefetchBit(1, predicted_address)==-1 )
-            {
-                if (!MSHR_lookup(PMAF2, cycle,predicted_address & 0xffff) &&
-                        !MSHR_lookup(MSHRD2, cycle,predicted_address))
-                {
-                    IssueL2Prefetch(cycle,predicted_address);
-                    MSHR_insert(PMAF2, cycle,predicted_address & 0xffff);
-                }
-            }
-            if (predicted_address)
-            {
-                // program PDA
-                PDA_history=history;
-                PDA_last_addr=L2Data->DataAddr & MASK_16b;
-                PDA_addr=predicted_address;
-                PDA_degree=AD_degree-1;
-            }
-        }
-        // else the PDA generates 1 prefetch per cycle
-    }
-    else if (PDA_degree && PDA_history)
-    {
-        // predict next missing address and get the new history
-        predicted_address = PDFCM_predict_next(PDA_addr, &PDA_history, PDA_last_addr);
-        // issue prefetch (if not filtered)
-        if (predicted_address && predicted_address!=PDA_addr &&
-                GetPrefetchBit(1, predicted_address)==-1 )
-        {
-            if (!MSHR_lookup(PMAF2, cycle,predicted_address & 0xffff) &&
-                    !MSHR_lookup(MSHRD2, cycle,predicted_address))
-            {
-                IssueL2Prefetch(cycle,predicted_address);
-                MSHR_insert(PMAF2, cycle,predicted_address & 0xffff);
-            }
-        }
-        // program PDA
-        PDA_last_addr=PDA_addr & MASK_16b;
-        PDA_addr=predicted_address;
-        PDA_degree--;
-    }
-}
-
-// *******************************************************************************
-//          SEQTL1 (L1 Prefetcher)
-// *******************************************************************************
-void SEQTL1_cycle(Tick cycle, AccessStat *L1Data)
-{
-    int i;
-    for (i=0; i<4; i++)
-    {
-        // miss or "1st use" in L1?
-        if (cycle == L1Data[i].LastRequestCycle && (L1Data[i].hit == 0 ||
-                GetPrefetchBit(0, L1Data[i].DataAddr)==1) )
-        {
-            if (L1Data[i].hit == 1)
-                UnSetPrefetchBit(0, L1Data[i].DataAddr);
-            // program SDA1
-            SDA1_last_addr=L1Data[i].DataAddr;
-            SDA1_degree=(L1Data[i].hit == 0 ? 1 : 4 );
-        } //end if
-    } //end for
-    // // the SDA1 generates 1 prefetch per cycle
-    if (SDA1_degree)
-    {
-        Addr predicted_address= SDA1_last_addr+0x40;
-        // issue prefetch (if not filtered)
-        if (get_prefetch_bit(predicted_address) == 0)
-        {
-            if (!MSHR_lookup(PMAF1, cycle,predicted_address & 0xffff))
-            {
-                issue_prefetch(predicted_address);
-                
-                // if (IssueL1Prefetch(cycle,predicted_address)==0)
-                // {
-                    MSHR_insert(PMAF1, cycle,predicted_address & 0xffff);
-                // }
-            }
-        }
-        // program next prefetch for the next cycle
-        SDA1_last_addr=predicted_address;
-        SDA1_degree--;
-    }
-}
-
-
-// *******************************************************************************
-//          MSHR
-// *******************************************************************************
-
 void MSHR_ini (void)
 {
     PMAF1=(MSHR *) calloc(1, sizeof(MSHR));
@@ -325,20 +187,18 @@ void MSHR_ini (void)
     PMAF2=(MSHR *) calloc(1, sizeof(MSHR));
     PMAF2->size=32;
 }
-int MSHR_lookup (MSHR * MSHR, Tick cycle, Addr addr)
+int MSHR_lookup (MSHR * MSHR, Addr addr)
 {
     int i;
     Addr MASK = 0x3f;
     if (!MSHR->size || !MSHR->num)
         return 0;
     for (i=0; i < MSHR->size; i++)
-    {
         if (MSHR->entry[i].valid && (MSHR->entry[i].addr == (addr & ~MASK)) )
             return 1;
-    }
     return 0;
 }
-void MSHR_insert (MSHR * MSHR, Tick cycle, Addr addr)
+void MSHR_insert (MSHR * MSHR, Addr addr)
 {
     Addr MASK = 0x3f;
     if (!MSHR->size || !addr)
@@ -352,9 +212,9 @@ void MSHR_insert (MSHR * MSHR, Tick cycle, Addr addr)
         MSHR->head=MSHR->tail;
 }
 
-void MSHR_cycle (Tick cycle)
+void MSHR_cycle ()
 {
-    if (PMAF1->num && (get_prefetch_bit(PMAF1->entry[PMAF1->head].addr) != 0 )
+    if (PMAF1->num && (get_prefetch_bit(PMAF1->entry[PMAF1->head].addr) != 0 ))
     {
         PMAF1->num--;
         PMAF1->entry[PMAF1->head].valid=0;
@@ -374,51 +234,135 @@ void MSHR_cycle (Tick cycle)
     }
 }
 
-// *******************************************************************************
-//          ADAPTIVE DEGREE (L2)
-// *******************************************************************************
+#define LOOKBACK_DEGREE 4
+struct AccessStat accessStatHistory[LOOKBACK_DEGREE];
 
-void AD_cycle(Tick cycle, AccessStat *L1Data)
+void AdaptiveDegree_Cycle(AccessStat *L1Data)
 {
     int i;
-    AD_cycles++;
+    AdaptiveDegree_Cycles++;
     // Count how many references there were to L1 in the previous cycle
     // Optimally, we would have an instruction counter, but sim framework is limited
     // We use AD_L1_access to determine L2 adaption degree
-    for(i = 0; i < 4; i++)
-    {
-        if(cycle == L1Data[i].LastRequestCycle)
+    for(i = 0; i < LOOKBACK_DEGREE; i++)
+        if(L1Data->time == accessStatHistory[i].time)
             AD_L1_accesses++;
-    }
-    // AD_interval is an epoch (given number of cycles). When we surpass this,
+
+    // AD_interval is an epoch (given number of cycles). When we pass this,
     // we change our degree automaton to either increasing or decreasing (AD_STATE)
     // In an epoch, we define success on whether or not we have many L1 hits
     // See page 7 in ./doc/doc.pdf
-    if (AD_cycles>AD_interval)
+    if (AdaptiveDegree_Cycles>AD_interval)
     {
-        AD_cycles=0;
+        AdaptiveDegree_Cycles=0;
         if (AD_L1_accesses<AD_last_L1_accesses)
             AD_state=!AD_state;
         if (!AD_state)
-        {
-            if (AD_deg_index<AD_MAX_INDEX-1) AD_deg_index++;
-        }
+            if (AD_deg_index<AD_MAX_INDEX-1) 
+                AD_deg_index++;
         else
-        {
-            if (AD_deg_index>0) AD_deg_index--;
-        }
+            if (AD_deg_index>0) 
+                AD_deg_index--;
         AD_degree=AD_degs[AD_deg_index];
         AD_last_L1_accesses=AD_L1_accesses;
         AD_L1_accesses=0;
     }
 }
-
-
-void prefetch_complete(Addr addr)
+// *******************************************************************************
+//          SEQTL1 (L1 Prefetcher)
+// *******************************************************************************
+void SEQTL1_cycle(AccessStat *L1Data)
 {
-    /*
-     * Called when a block requested by the prefetcher has been loaded.
-     */
+    int i;
+    for (i=0; i<LOOKBACK_DEGREE; i++)
+    {
+        // miss or "1st use" in L1?
+        if (L1Data->time == accessStatHistory[i].time && (accessStatHistory[i].miss == 1 ||
+                get_prefetch_bit(accessStatHistory[i].mem_addr)==1) )
+        {
+            if (accessStatHistory[i].miss == 0)
+                clear_prefetch_bit(accessStatHistory[i].mem_addr);
+            // program SDA1
+            SeqDegreeAuto_lastaddr=accessStatHistory[i].mem_addr;
+            SeqDegreeAuto_degree=(accessStatHistory[i].miss == 0 ? 1 : 4 );
+        } 
+    } 
+    if (SeqDegreeAuto_degree)
+    {
+        Addr predicted_address= SeqDegreeAuto_lastaddr+0x40;
+        // issue prefetch (if not filtered)
+        if (get_prefetch_bit(predicted_address) == 0
+        && !MSHR_lookup(PMAF1,predicted_address & 0xffff))
+        {
+            issue_prefetch(predicted_address);
+            MSHR_insert(PMAF1,predicted_address & 0xffff);
+        }
+        // program next prefetch for the next cycle
+        SeqDegreeAuto_lastaddr=predicted_address;
+        SeqDegreeAuto_degree--;
+    }
+}
+void PDFCM_cycle(AccessStat *L2Data)
+{
+    Addr predicted_address;
+    unsigned short history=PDA_history;
+    // miss or "1st use" in L2? (considering only demand references)
+    if (/*L2Data->tim == L2Data->time && !L2Data->LastRequestPrefetch && */
+            ((L2Data->miss == 1  && !MSHR_lookup(MSHRD2, L2Data->mem_addr)) ||
+             get_prefetch_bit(L2Data->mem_addr)==1)  )
+    {
+        if (L2Data->miss == 1)
+            MSHR_insert(MSHRD2, L2Data->mem_addr);
+        else
+            clear_prefetch_bit(L2Data->mem_addr);
+        // update PDFCM tables, predict next missing address and get the new history
+        predicted_address = PDFCM_update_and_predict(L2Data->pc,
+                            L2Data->mem_addr, &history);
+        if (AD_degree)
+        {
+            // issue prefetch (if not filtered)
+            if (predicted_address && predicted_address!=L2Data->mem_addr &&
+                    get_prefetch_bit(predicted_address)==0 )
+            {
+                if (!MSHR_lookup(PMAF2,predicted_address & 0xffff) &&
+                        !MSHR_lookup(MSHRD2, predicted_address))
+                {
+                    issue_prefetch(predicted_address);
+                    set_prefetch_bit(predicted_address);
+                    MSHR_insert(PMAF2,predicted_address & 0xffff);
+                }
+            }
+            if (predicted_address)
+            {
+                // program PDA
+                PDA_history=history;
+                PDA_last_addr=L2Data->mem_addr & MASK_16b;
+                PDA_addr=predicted_address;
+                PDA_degree=AD_degree-1;
+            }
+        }
+        // else the PDA generates 1 prefetch per cycle
+    }
+    else if (PDA_degree && PDA_history)
+    {
+        // predict next missing address and get the new history
+        predicted_address = PDFCM_predict_next(PDA_addr, &PDA_history, PDA_last_addr);
+        // issue prefetch (if not filtered)
+        if (predicted_address && predicted_address!=PDA_addr &&
+                get_prefetch_bit(predicted_address)==0 )
+        {
+            if (!MSHR_lookup(PMAF2,predicted_address & 0xffff) &&
+                    !MSHR_lookup(MSHRD2,predicted_address))
+            {
+                issue_prefetch(predicted_address);
+                MSHR_insert(PMAF2,predicted_address & 0xffff);
+            }
+        }
+        // program PDA
+        PDA_last_addr=PDA_addr & MASK_16b;
+        PDA_addr=predicted_address;
+        PDA_degree--;
+    }
 }
 void prefetch_init(void)
 {
@@ -426,14 +370,32 @@ void prefetch_init(void)
     /* This is the place to initialize data structures. */
     PDFCM_ini();
     MSHR_ini();
+    struct AccessStat *tmp = (struct AccessStat*)malloc(sizeof(struct AccessStat));
+    tmp->time = -1;
+    tmp->pc = -1;
+    tmp->mem_addr = -1;
+    tmp->miss = -1;
+    for(int i = 0; i < LOOKBACK_DEGREE; i++)
+        accessStatHistory[i] = *tmp;
 }
+
+int index = 0;
 void prefetch_access(AccessStat stat)
 {
     //  Function that is called every cycle to issue prefetches should the
     //  prefetcher want to.  The arguments to the function are the current cycle,
     //  the demand requests to L1 and L2 cache.
-    MSHR_cycle(cycle);
-    AD_cycle(cycle, L1Data);
-    SEQTL1_cycle(cycle, L1Data);
-    PDFCM_cycle(cycle, L2Data);
+    MSHR_cycle();
+    AccessStat *ptr = &stat;
+    AdaptiveDegree_Cycle(ptr);
+    SEQTL1_cycle(ptr);
+    PDFCM_cycle(ptr);
+
+    accessStatHistory[(index++)%4] = stat;
+}
+
+void prefetch_complete(Addr addr)
+{
+    /* Called when a block requested by the prefetcher has been loaded.
+     */
 }
