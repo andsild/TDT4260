@@ -35,12 +35,12 @@ struct historyTablerecord // short: 16 bits
 };
 historyTablerecord * HistoryTable;  
 
-typedef struct DeltaTablerecord DeltaTablerecord;
-struct DeltaTablerecord
+typedef struct DeltaTableRecord DeltaTableRecord;
+struct DeltaTableRecord
 {
     short delta; 
 };
-DeltaTablerecord * DeltaTable; 
+DeltaTableRecord * DeltaTable; 
 
 void InitializeDatastructures (void);
 Addr UpdateTables (Addr pc, Addr addr,
@@ -103,7 +103,7 @@ void AdaptiveDegree_Cycle(AccessStat *L1Data);
 void InitializeDatastructures (void)
 {
     HistoryTable=(historyTablerecord *) calloc(HISTORY_TABLE_SIZE, sizeof(historyTablerecord));
-    DeltaTable=(DeltaTablerecord *) calloc(DELTA_SIZE, sizeof(DeltaTablerecord));
+    DeltaTable=(DeltaTableRecord *) calloc(DELTA_SIZE, sizeof(DeltaTableRecord));
 
     L1Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
     L1Mshr->size=32;
@@ -117,7 +117,7 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
 {
     unsigned short currentMiss;
     unsigned short currentHistory;
-    short currentDelta, predictedDelta;
+    short actualDelta, predictedDelta;
     unsigned int index = pc & HISTORYTABLE_MASK;
     unsigned short previousHashHistory = HistoryTable[index].hashHistory;
     char confidence = HistoryTable[index].hitCount;
@@ -132,8 +132,8 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
     }
     // compute deltas & update confidence Tick
     predictedDelta=DeltaTable[previousHashHistory].delta;
-    currentDelta = (addr-HistoryTable[index].lastAddrMiss) & BITMASK_16;
-    if (currentDelta==predictedDelta)
+    actualDelta = (addr-HistoryTable[index].lastAddrMiss) & BITMASK_16;
+    if (actualDelta==predictedDelta)
     {
         if (confidence<3) { confidence++; }
     }
@@ -142,13 +142,14 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
     }
     // compute new hashHistory
     currentMiss = addr & BITMASK_16;
-    *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, currentDelta);
+    // *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, actualDelta);
+    *hashHistory = currentHistory = 111;
     // write HistoryTable record
     HistoryTable[index].lastAddrMiss = currentMiss;
     HistoryTable[index].hashHistory   = currentHistory;
     HistoryTable[index].hitCount=confidence;
     // update DeltaTable record
-    DeltaTable[previousHashHistory].delta = currentDelta;
+    DeltaTable[previousHashHistory].delta = actualDelta;
     // predict a new delta using the new hashHistory
     if (confidence<2)
         return 0;
@@ -170,6 +171,7 @@ Addr MakePrediction (Addr addr, unsigned short *hashHistory,
 
 unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
 {
+    // FIXME: infinite loop
     unsigned short foldedBits, maskedFold;
     short select=delta;
     for(foldedBits=0; select;)
@@ -234,35 +236,35 @@ struct AccessStat accessStatHistory[LOOKBACK_DEGREE];
 
 void AdaptiveDegree_Cycle(AccessStat *L1Data)
 {
-    AdaptiveDegree_Cycles++;
-    // confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
-    // Optimally, we would have an instruction counter, but sim framework is limited
-    // We use the variable below to determine determine L2 adaption degree
-    for(int i = 0; i < LOOKBACK_DEGREE; i++)
-        if(L1Data->time == accessStatHistory[i].time)
-            L1AccessConfidence++;
+    //AdaptiveDegree_Cycles++;
+    //// confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
+    //// Optimally, we would have an instruction counter, but sim framework is limited
+    //// We use the variable below to determine determine L2 adaption degree
+    //for(int i = 0; i < LOOKBACK_DEGREE; i++)
+    //    if(L1Data->time == accessStatHistory[i].time)
+    //        L1AccessConfidence++;
 
-    // MAX_EPOCH_CYCLES is an epoch (given number of cycles).
-    // In an epoch, we define success on whether or not we have many hits to prefetches.
-    // At the end of an epoch we adjust our degree (gradient)
-    // See page 7 in ./doc/doc.pdf
-    if (AdaptiveDegree_Cycles>MAX_EPOCH_CYCLES)
-    {
-        AdaptiveDegree_Cycles=0;
-        if (L1AccessConfidence<FormerL1AccessConfidence)
-            DegreeIsDecreasing=!DegreeIsDecreasing;
-        if (!DegreeIsDecreasing)
-        {
-            if (CurrentDegreeIndex<MAX_DEGREES-1) 
-                CurrentDegreeIndex++;
-        }
-        else
-            if (CurrentDegreeIndex>0) 
-                CurrentDegreeIndex--;
-        CurrentDegree=DegreeList[CurrentDegreeIndex];
-        FormerL1AccessConfidence=L1AccessConfidence;
-        L1AccessConfidence=0;
-    }
+    //// MAX_EPOCH_CYCLES is an epoch (given number of cycles).
+    //// In an epoch, we define success on whether or not we have many hits to prefetches.
+    //// At the end of an epoch we adjust our degree (gradient)
+    //// See page 7 in ./doc/doc.pdf
+    //if (AdaptiveDegree_Cycles>MAX_EPOCH_CYCLES)
+    //{
+    //    AdaptiveDegree_Cycles=0;
+    //    if (L1AccessConfidence<FormerL1AccessConfidence)
+    //        DegreeIsDecreasing=!DegreeIsDecreasing;
+    //    if (!DegreeIsDecreasing)
+    //    {
+    //        if (CurrentDegreeIndex<MAX_DEGREES-1) 
+    //            CurrentDegreeIndex++;
+    //    }
+    //    else
+    //        if (CurrentDegreeIndex>0) 
+    //            CurrentDegreeIndex--;
+    //    CurrentDegree=DegreeList[CurrentDegreeIndex];
+    //    FormerL1AccessConfidence=L1AccessConfidence;
+    //    L1AccessConfidence=0;
+    //}
 }
 
 void L1Prefetch(AccessStat *L1Data)
@@ -378,11 +380,16 @@ void prefetch_access(AccessStat stat)
 
     AccessStat *ptr = &stat;
 
-   AdaptiveDegree_Cycle(ptr);
-   L1Prefetch(ptr);
-   PDFCM_cycle(ptr);
+    AdaptiveDegree_Cycle(ptr);
+    L1Prefetch(ptr);
+    PDFCM_cycle(ptr);
 
-   accessStatHistory[(myIndex++)%4] = stat;
+    myIndex++;
+
+    // if(accessStatHistory[myIndex%4] != NULL)
+    //     free(accessStatHistory[myIndex%4] );
+   accessStatHistory[(myIndex)%4] = stat;
+   exit(1);
 }
 
 void prefetch_complete(Addr addr)
