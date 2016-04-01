@@ -15,10 +15,14 @@
 #include "interface.hh"
 
 
+//TODO: experiment with these numbers
+#define LOOKBACK_DEGREE 8
+#define MSHR_SIZE 16
+#define DELTA_MSHR_SIZE 16
 #define BITMASK_16 (0xffff)
 #define MAX_EPOCH_CYCLES (64*1024)
 #define MAX_DEGREES (13)   // number of different degrees
-#define DELTATABLE_BITS (9)
+#define DELTATABLE_BITS (17) // doesnt seem to matter much
 #define DELTA_SIZE (1 << DELTATABLE_BITS) // multiply by 2^DELTATABLE_BITS, e.g. 1 << 1 = 2, 1 << 2 = 4, etc
 #define DELTAMASK (DELTA_SIZE - 1)
 #define HISTORYTABLE_BITS 8
@@ -77,7 +81,7 @@ struct CustomMshr
     int tail;
     int num;
     int head;
-    MshrRecord record[32];
+    MshrRecord record[MSHR_SIZE];
 };
 CustomMshr * L1Mshr;
 CustomMshr * DeltaMshr;
@@ -106,11 +110,11 @@ void InitializeDatastructures (void)
     DeltaTable=(DeltaTableRecord *) calloc(DELTA_SIZE, sizeof(DeltaTableRecord));
 
     L1Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
-    L1Mshr->size=32;
+    L1Mshr->size=MSHR_SIZE;
     DeltaMshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
-    DeltaMshr->size=16;
+    DeltaMshr->size=DELTA_MSHR_SIZE;
     L2Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
-    L2Mshr->size=32;
+    L2Mshr->size=MSHR_SIZE;
 }
 
 Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
@@ -234,7 +238,6 @@ void MshrIteration ()
     }
 }
 
-#define LOOKBACK_DEGREE 4
 struct AccessStat accessStatHistory[LOOKBACK_DEGREE];
 
 void AdaptiveDegree_Cycle(AccessStat *L1Data)
