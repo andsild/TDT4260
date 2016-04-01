@@ -115,12 +115,14 @@ void InitializeDatastructures (void)
 
 Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
 {
-    unsigned short currentMiss;
+    unsigned short currentMissedAddress;
     unsigned short currentHistory;
     short actualDelta, predictedDelta;
     unsigned int index = pc & HISTORYTABLE_MASK;
+    unsigned short previousAddress = HistoryTable[index].lastAddrMiss;
     unsigned short previousHashHistory = HistoryTable[index].hashHistory;
     char confidence = HistoryTable[index].hitCount;
+
     if (HistoryTable[index].PC!=((pc>>HISTORYTABLE_BITS) & BITMASK_16))
     {
         // if it's a new PC replace the record
@@ -131,8 +133,8 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
         return 0;
     }
     // compute deltas & update confidence Tick
-    predictedDelta=DeltaTable[previousHashHistory].delta;
-    actualDelta = (addr-HistoryTable[index].lastAddrMiss) & BITMASK_16;
+    predictedDelta = DeltaTable[previousHashHistory].delta;
+    actualDelta = (addr-previousAddress) & BITMASK_16;
     if (actualDelta==predictedDelta)
     {
         if (confidence<3) { confidence++; }
@@ -140,20 +142,21 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
     else {
         if (confidence>0) { confidence--; }
     }
-    // compute new hashHistory
-    currentMiss = addr & BITMASK_16;
-    // *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, actualDelta);
-    *hashHistory = currentHistory = 111;
+
+    currentMissedAddress = addr & BITMASK_16;
+    *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, actualDelta);
     // write HistoryTable record
-    HistoryTable[index].lastAddrMiss = currentMiss;
+    HistoryTable[index].lastAddrMiss = currentMissedAddress;
     HistoryTable[index].hashHistory   = currentHistory;
     HistoryTable[index].hitCount=confidence;
+
     // update DeltaTable record
     DeltaTable[previousHashHistory].delta = actualDelta;
-    // predict a new delta using the new hashHistory
+
     if (confidence<2)
         return 0;
     else
+        // predict a new delta using the new hashHistory
         return addr + DeltaTable[currentHistory].delta;
 }
 
@@ -173,7 +176,7 @@ unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short d
 {
     // FIXME: infinite loop
     unsigned short foldedBits, maskedFold;
-    short select=delta;
+    unsigned short select=delta; // note: this is a cast
     for(foldedBits=0; select;)
     {
         foldedBits ^= select & DELTAMASK;
@@ -236,35 +239,35 @@ struct AccessStat accessStatHistory[LOOKBACK_DEGREE];
 
 void AdaptiveDegree_Cycle(AccessStat *L1Data)
 {
-    //AdaptiveDegree_Cycles++;
-    //// confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
-    //// Optimally, we would have an instruction counter, but sim framework is limited
-    //// We use the variable below to determine determine L2 adaption degree
-    //for(int i = 0; i < LOOKBACK_DEGREE; i++)
-    //    if(L1Data->time == accessStatHistory[i].time)
-    //        L1AccessConfidence++;
+    AdaptiveDegree_Cycles++;
+    // confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
+    // Optimally, we would have an instruction counter, but sim framework is limited
+    // We use the variable below to determine determine L2 adaption degree
+    for(int i = 0; i < LOOKBACK_DEGREE; i++)
+       if(L1Data->time == accessStatHistory[i].time)
+           L1AccessConfidence++;
 
     //// MAX_EPOCH_CYCLES is an epoch (given number of cycles).
     //// In an epoch, we define success on whether or not we have many hits to prefetches.
     //// At the end of an epoch we adjust our degree (gradient)
     //// See page 7 in ./doc/doc.pdf
-    //if (AdaptiveDegree_Cycles>MAX_EPOCH_CYCLES)
-    //{
-    //    AdaptiveDegree_Cycles=0;
-    //    if (L1AccessConfidence<FormerL1AccessConfidence)
-    //        DegreeIsDecreasing=!DegreeIsDecreasing;
-    //    if (!DegreeIsDecreasing)
-    //    {
-    //        if (CurrentDegreeIndex<MAX_DEGREES-1) 
-    //            CurrentDegreeIndex++;
-    //    }
-    //    else
-    //        if (CurrentDegreeIndex>0) 
-    //            CurrentDegreeIndex--;
-    //    CurrentDegree=DegreeList[CurrentDegreeIndex];
-    //    FormerL1AccessConfidence=L1AccessConfidence;
-    //    L1AccessConfidence=0;
-    //}
+    if (AdaptiveDegree_Cycles>MAX_EPOCH_CYCLES)
+    {
+       AdaptiveDegree_Cycles=0;
+       if (L1AccessConfidence<FormerL1AccessConfidence)
+           DegreeIsDecreasing=!DegreeIsDecreasing;
+       if (!DegreeIsDecreasing)
+       {
+           if (CurrentDegreeIndex<MAX_DEGREES-1) 
+               CurrentDegreeIndex++;
+       }
+       else
+           if (CurrentDegreeIndex>0) 
+               CurrentDegreeIndex--;
+       CurrentDegree=DegreeList[CurrentDegreeIndex];
+       FormerL1AccessConfidence=L1AccessConfidence;
+       L1AccessConfidence=0;
+    }
 }
 
 void L1Prefetch(AccessStat *L1Data)
@@ -272,13 +275,12 @@ void L1Prefetch(AccessStat *L1Data)
     // degree is trivially set to 4, needs some  experimenting.
     for (int i=0; i<LOOKBACK_DEGREE; i++)
     {
-        // miss or "1st use" in L1?
         if (L1Data->time == accessStatHistory[i].time && (accessStatHistory[i].miss == 1 ||
-                get_prefetch_bit(accessStatHistory[i].mem_addr)==1) )
+                get_prefetch_bit(accessStatHistory[i].mem_addr)!=0) )
         {
             if (accessStatHistory[i].miss == 0)
                 clear_prefetch_bit(accessStatHistory[i].mem_addr);
-            // program SDA1
+
             L1LastAddress=accessStatHistory[i].mem_addr;
             L1LastDegree=(accessStatHistory[i].miss == 0 ? 1 : 4 );
         } 
@@ -305,8 +307,9 @@ void PDFCM_cycle(AccessStat *L2Data)
 {
     Addr predicted_address;
     unsigned short hashHistory=StateHashHistory;
+
     if (((L2Data->miss == 1  && !MshrLookup(DeltaMshr, L2Data->mem_addr)) ||
-             get_prefetch_bit(L2Data->mem_addr)==1)  )
+             get_prefetch_bit(L2Data->mem_addr)!=0)  )
     {
         if (L2Data->miss == 1)
             MshrInsert(DeltaMshr, L2Data->mem_addr);
@@ -316,11 +319,11 @@ void PDFCM_cycle(AccessStat *L2Data)
         predicted_address = UpdateTables(L2Data->pc,
                             L2Data->mem_addr, &hashHistory);
 
-        if(CurrentDegree != 0)
+        if(CurrentDegree)
         {
             // issue prefetch (if not filtered)
             if (predicted_address && predicted_address!=L2Data->mem_addr &&
-                    get_prefetch_bit(predicted_address)==0
+                    ! get_prefetch_bit(predicted_address)
                 && !MshrLookup(L2Mshr,predicted_address & 0xffff) &&
                     !MshrLookup(DeltaMshr, predicted_address)
                     && predicted_address < MAX_PHYS_MEM_ADDR )
@@ -343,7 +346,7 @@ void PDFCM_cycle(AccessStat *L2Data)
         predicted_address = MakePrediction(StatePrediction, &StateHashHistory, LastMissedAddress);
         // issue prefetch (if not filtered)
         if (predicted_address && predicted_address!=StatePrediction &&
-                get_prefetch_bit(predicted_address)==0
+                !get_prefetch_bit(predicted_address)
                 &&
                 !MshrLookup(L2Mshr,predicted_address & 0xffff) &&
                 !MshrLookup(DeltaMshr,predicted_address)
@@ -389,7 +392,6 @@ void prefetch_access(AccessStat stat)
     // if(accessStatHistory[myIndex%4] != NULL)
     //     free(accessStatHistory[myIndex%4] );
    accessStatHistory[(myIndex)%4] = stat;
-   exit(1);
 }
 
 void prefetch_complete(Addr addr)
