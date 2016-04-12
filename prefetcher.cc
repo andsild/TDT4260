@@ -23,7 +23,7 @@
 // #define BITMASK 0xffffffffffffffff
 #define MAX_EPOCH_CYCLES (64*1024)
 #define MAX_DEGREES (10)   // number of different degrees
-#define DELTATABLE_BITS (10) // doesnt seem to matter much
+#define DELTATABLE_BITS (6) // doesnt seem to matter much
 #define DELTA_SIZE (1 << DELTATABLE_BITS) // multiply by 2^DELTATABLE_BITS, e.g. 1 << 1 = 2, 1 << 2 = 4, etc
 #define DELTAMASK (DELTA_SIZE - 1)
 #define HISTORYTABLE_BITS 8
@@ -84,8 +84,7 @@ struct CustomMshr
     short head;
     MshrRecord record[MSHR_SIZE];
 };
-CustomMshr * L1Mshr;
-CustomMshr * L2Mshr;
+// CustomMshr * L2Mshr;
 
 int MshrLookup (CustomMshr * MSHR, Addr addr);
 void MshrInsert (CustomMshr * MSHR, Addr addr);
@@ -109,10 +108,8 @@ void InitializeDatastructures (void)
     HistoryTable=(historyTablerecord *) calloc(HISTORY_TABLE_SIZE, sizeof(historyTablerecord));
     DeltaTable=(DeltaTableRecord *) calloc(DELTA_SIZE, sizeof(DeltaTableRecord));
 
-    L1Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
-    L1Mshr->size=MSHR_SIZE;
-    L2Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
-    L2Mshr->size=MSHR_SIZE;
+    // L2Mshr=(CustomMshr *) calloc(1, sizeof(CustomMshr));
+    // L2Mshr->size=MSHR_SIZE;
 }
 
 Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
@@ -214,18 +211,12 @@ void MshrInsert (CustomMshr * Mshr, Addr addr)
 
 void MshrIteration ()
 {
-    // if (L1Mshr->num && (get_prefetch_bit(L1Mshr->record[L1Mshr->head].address) != 0 ))
+    // if (L2Mshr->num && (get_prefetch_bit(L2Mshr->record[L2Mshr->head].address) != 0) )
     // {
-    //     L1Mshr->num--;
-    //     L1Mshr->record[L1Mshr->head].isValid=0;
-    //     L1Mshr->head=(L1Mshr->head+1)%L1Mshr->size;
+    //     L2Mshr->num--;
+    //     L2Mshr->record[L2Mshr->head].isValid=0;
+    //     L2Mshr->head=(L2Mshr->head+1)%L2Mshr->size;
     // }
-    if (L2Mshr->num && (get_prefetch_bit(L2Mshr->record[L2Mshr->head].address) != 0) )
-    {
-        L2Mshr->num--;
-        L2Mshr->record[L2Mshr->head].isValid=0;
-        L2Mshr->head=(L2Mshr->head+1)%L2Mshr->size;
-    }
 }
 
 struct AccessStat accessStatHistory[LOOKBACK_DEGREE];
@@ -238,7 +229,7 @@ void AdaptiveDegree_Cycle(AccessStat *L1Data)
     // We use the variable below to determine determine L2 adaption degree
     for(int i = 0; i < LOOKBACK_DEGREE; i++)
        // if(L1Data->time == accessStatHistory[i].time)
-       if(in_cache(L1Data->mem_addr)
+       if(in_cache(L1Data->mem_addr))
            L1AccessConfidence++;
 
     //// MAX_EPOCH_CYCLES is an epoch (given number of cycles).
@@ -286,14 +277,14 @@ void L1Prefetch(AccessStat *L1Data)
         Addr predicted_address= L1LastAddress+READAHEAD; 
         // issue prefetch (if not filtered)
         if (get_prefetch_bit(predicted_address) == 0
-        // && !MshrLookup(L1Mshr,predicted_address & BITMASK_16 ))
-        && !MshrLookup(L2Mshr,predicted_address & BITMASK_16 ))
+        // && !MshrLookup(L2Mshr,predicted_address & BITMASK_16 ))
+        && !in_mshr_queue(predicted_address & BITMASK_16 ))
         {
             if(predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
+                // MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
         }
         L1LastAddress=predicted_address;
@@ -319,18 +310,19 @@ void PDFCM_cycle(AccessStat *L2Data)
             // issue prefetch (if not filtered)
             if (predicted_address && predicted_address!=L2Data->mem_addr &&
                     ! get_prefetch_bit(predicted_address)
-                && !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
+                // && !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
+                && !in_mshr_queue(predicted_address & BITMASK_16) &&
                     ! in_cache(predicted_address)
                     && predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
+                // MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
             if (predicted_address)
             {
                 StateHashHistory=hashHistory;
-                LastMissedAddress=L2Data->mem_addr & BITMASK_16_16;
+                LastMissedAddress=L2Data->mem_addr & BITMASK_16;
                 StatePrediction=predicted_address;
                 StateDegree=CurrentDegree-1;
             }
@@ -343,13 +335,14 @@ void PDFCM_cycle(AccessStat *L2Data)
         if (predicted_address && predicted_address!=StatePrediction &&
                 !get_prefetch_bit(predicted_address)
                 &&
-                !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
+                // !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
+                !in_mshr_queue(predicted_address & BITMASK_16) &&
                 !in_cache(predicted_address)
                 && predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
+                // MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
         LastMissedAddress=StatePrediction & BITMASK_16;
         StatePrediction=predicted_address;
