@@ -16,13 +16,13 @@
 
 
 //TODO: experiment with these numbers
-#define LOOKBACK_DEGREE 8
-#define MSHR_SIZE 16
+#define LOOKBACK_DEGREE 4
+#define MSHR_SIZE 128
 #define DELTA_MSHR_SIZE 16
 #define BITMASK_16 (0xffff)
-#define MAX_EPOCH_CYCLES (64*1024)
+#define MAX_EPOCH_CYCLES (64*1024) // TODO: next to modify!
 #define MAX_DEGREES (13)   // number of different degrees
-#define DELTATABLE_BITS (17) // doesnt seem to matter much
+#define DELTATABLE_BITS (9) // doesnt seem to matter much
 #define DELTA_SIZE (1 << DELTATABLE_BITS) // multiply by 2^DELTATABLE_BITS, e.g. 1 << 1 = 2, 1 << 2 = 4, etc
 #define DELTAMASK (DELTA_SIZE - 1)
 #define HISTORYTABLE_BITS 8
@@ -178,7 +178,6 @@ Addr MakePrediction (Addr addr, unsigned short *hashHistory,
 
 unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
 {
-    // FIXME: infinite loop
     unsigned short foldedBits, maskedFold;
     unsigned short select=delta; // note: this is a cast
     for(foldedBits=0; select;)
