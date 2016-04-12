@@ -18,11 +18,9 @@
 #define LOOKBACK_DEGREE 8
 #define MSHR_SIZE 16
 #define DELTA_MSHR_SIZE 16
-#define BITMASK_16 (0xffffffff)
-#define BITMASK 0xffffffff
+#define BITMASK_16 0xffff
 #define READAHEAD 0x40 // 0x40 = 64 = 1000000 = 2^6
 // #define BITMASK 0xffffffffffffffff
-// #define BITMASK 0xffffffff
 #define MAX_EPOCH_CYCLES (64*1024)
 #define MAX_DEGREES (10)   // number of different degrees
 #define DELTATABLE_BITS (10) // doesnt seem to matter much
@@ -35,9 +33,9 @@
 typedef struct historyTablerecord historyTablerecord;
 struct historyTablerecord // short: 16 bits
 {
-    int64_t PC;
-    uint64_t lastAddrMiss;
-    uint64_t hashHistory;
+    unsigned short PC;
+    unsigned short lastAddrMiss;
+    unsigned short hashHistory;
     char hitCount;
 };
 historyTablerecord * HistoryTable;  
@@ -45,22 +43,22 @@ historyTablerecord * HistoryTable;
 typedef struct DeltaTableRecord DeltaTableRecord;
 struct DeltaTableRecord
 {
-    int64_t delta; 
+    short delta; 
 };
 DeltaTableRecord * DeltaTable; 
 
 void InitializeDatastructures (void);
 Addr UpdateTables (Addr pc, Addr addr,
-                   uint64_t
+                   unsigned short
                    *hashHistory);       
-Addr MakePrediction (Addr addr, uint64_t *hashHistory,
-                         uint64_t lastAddrMiss);   
-uint64_t CalculateHistoryMask (uint64_t previousHashHistory,
-                           int64_t delta);
+Addr MakePrediction (Addr addr, unsigned short *hashHistory,
+                         unsigned short lastAddrMiss);   
+unsigned short CalculateHistoryMask (unsigned short previousHashHistory,
+                           short delta);
 void PDFCM_cycle(AccessStat *L2Data);
 
-uint64_t StateHashHistory;
-uint64_t LastMissedAddress;
+unsigned short StateHashHistory;
+unsigned short LastMissedAddress;
 // We see our program as a state machine where one state represents
 // a degree and an address
 Addr StatePrediction;
@@ -117,12 +115,12 @@ void InitializeDatastructures (void)
     L2Mshr->size=MSHR_SIZE;
 }
 
-Addr UpdateTables (Addr pc, Addr addr, uint64_t *hashHistory)
+Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
 {
-    uint64_t currentHistory;
+    unsigned short currentHistory;
     unsigned int index = pc & HISTORYTABLE_MASK;
-    uint64_t previousAddress = HistoryTable[index].lastAddrMiss;
-    uint64_t previousHashHistory = HistoryTable[index].hashHistory;
+    unsigned short previousAddress = HistoryTable[index].lastAddrMiss;
+    unsigned short previousHashHistory = HistoryTable[index].hashHistory;
     char confidence = HistoryTable[index].hitCount;
 
     if (HistoryTable[index].PC!=((pc>>HISTORYTABLE_BITS) & BITMASK_16))
@@ -135,8 +133,8 @@ Addr UpdateTables (Addr pc, Addr addr, uint64_t *hashHistory)
         return 0;
     }
     // compute deltas & update confidence Tick
-    int64_t predictedDelta = DeltaTable[previousHashHistory].delta;
-    int64_t actualDelta = (addr-previousAddress) & BITMASK_16;
+    short predictedDelta = DeltaTable[previousHashHistory].delta;
+    short actualDelta = (addr-previousAddress) & BITMASK_16;
     if (actualDelta==predictedDelta)
     {
         if (confidence<3) { confidence++; }
@@ -147,7 +145,7 @@ Addr UpdateTables (Addr pc, Addr addr, uint64_t *hashHistory)
 
     *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, actualDelta);
     // write HistoryTable record
-    HistoryTable[index].lastAddrMiss = (uint64_t)(addr & BITMASK_16); // current missed address
+    HistoryTable[index].lastAddrMiss = (unsigned short)(addr & BITMASK_16); // current missed address
     HistoryTable[index].hashHistory   = currentHistory;
     HistoryTable[index].hitCount=confidence;
 
@@ -161,11 +159,11 @@ Addr UpdateTables (Addr pc, Addr addr, uint64_t *hashHistory)
         return addr + DeltaTable[currentHistory].delta;
 }
 
-Addr MakePrediction (Addr addr, uint64_t *hashHistory,
-                         uint64_t old_lastAddrMiss)
+Addr MakePrediction (Addr addr, unsigned short *hashHistory,
+                         unsigned short old_lastAddrMiss)
 {
     // compute delta
-    int64_t delta = (addr-old_lastAddrMiss) & BITMASK_16;
+    short delta = (addr-old_lastAddrMiss) & BITMASK_16;
     // compute new hashHistory
     *hashHistory=CalculateHistoryMask(*hashHistory, delta);
     // predict a new delta using the new hashHistory
@@ -174,10 +172,10 @@ Addr MakePrediction (Addr addr, uint64_t *hashHistory,
 
 // See the following, bottom page 6 and top 7
 // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.92.6198&rep=rep1&type=pdf
-uint64_t CalculateHistoryMask (uint64_t previousHashHistory, int64_t delta)
+unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
 {
-    uint64_t foldedBits, maskedFold;
-    uint64_t select=delta; // note: this is a cast
+    unsigned short foldedBits, maskedFold;
+    unsigned short select=delta; // note: this is a cast
     for(foldedBits=0; select;)
     {
         foldedBits ^= select & DELTAMASK;
@@ -288,14 +286,14 @@ void L1Prefetch(AccessStat *L1Data)
         Addr predicted_address= L1LastAddress+READAHEAD; 
         // issue prefetch (if not filtered)
         if (get_prefetch_bit(predicted_address) == 0
-        // && !MshrLookup(L1Mshr,predicted_address & BITMASK ))
-        && !MshrLookup(L2Mshr,predicted_address & BITMASK ))
+        // && !MshrLookup(L1Mshr,predicted_address & BITMASK_16 ))
+        && !MshrLookup(L2Mshr,predicted_address & BITMASK_16 ))
         {
             if(predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK);
+                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
         }
         L1LastAddress=predicted_address;
@@ -305,7 +303,7 @@ void L1Prefetch(AccessStat *L1Data)
 void PDFCM_cycle(AccessStat *L2Data)
 {
     Addr predicted_address;
-    uint64_t hashHistory=StateHashHistory;
+    unsigned short hashHistory=StateHashHistory;
 
     if (((L2Data->miss == 1  && ! in_cache(L2Data->mem_addr)) ||
              get_prefetch_bit(L2Data->mem_addr)!=0)  )
@@ -321,18 +319,18 @@ void PDFCM_cycle(AccessStat *L2Data)
             // issue prefetch (if not filtered)
             if (predicted_address && predicted_address!=L2Data->mem_addr &&
                     ! get_prefetch_bit(predicted_address)
-                && !MshrLookup(L2Mshr,predicted_address & BITMASK) &&
+                && !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
                     ! in_cache(predicted_address)
                     && predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK);
+                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
             if (predicted_address)
             {
                 StateHashHistory=hashHistory;
-                LastMissedAddress=L2Data->mem_addr & BITMASK_16;
+                LastMissedAddress=L2Data->mem_addr & BITMASK_16_16;
                 StatePrediction=predicted_address;
                 StateDegree=CurrentDegree-1;
             }
@@ -345,13 +343,13 @@ void PDFCM_cycle(AccessStat *L2Data)
         if (predicted_address && predicted_address!=StatePrediction &&
                 !get_prefetch_bit(predicted_address)
                 &&
-                !MshrLookup(L2Mshr,predicted_address & BITMASK) &&
+                !MshrLookup(L2Mshr,predicted_address & BITMASK_16) &&
                 !in_cache(predicted_address)
                 && predicted_address < MAX_PHYS_MEM_ADDR )
             {
                 issue_prefetch(predicted_address);
                 set_prefetch_bit(predicted_address);
-                MshrInsert(L2Mshr,predicted_address & BITMASK);
+                MshrInsert(L2Mshr,predicted_address & BITMASK_16);
             }
         LastMissedAddress=StatePrediction & BITMASK_16;
         StatePrediction=predicted_address;
