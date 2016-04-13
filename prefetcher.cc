@@ -17,7 +17,7 @@
 //TODO: experiment with these numbers
 //TODO: set back to 8,9 if fail
 //TODO: go back to whole ints? glorious 1.04 days
-#define MAX_EPOCH_CYCLES (64*1024)
+#define MAX_EPOCH_CYCLES (128*1024)
 #define BITMASK_16 0xffff
 #define MAX_DEGREES (10)   // number of different degrees
 #define DELTATABLE_BITS (10) // doesnt seem to matter much
@@ -44,15 +44,6 @@ struct DeltaTableRecord
 };
 DeltaTableRecord * DeltaTable; 
 
-Addr UpdateTables (Addr pc, Addr addr,
-                   unsigned short
-                   *hashHistory);       
-Addr MakePrediction (Addr addr, unsigned short *hashHistory,
-                         unsigned short lastAddrMiss);   
-unsigned short CalculateHistoryMask (unsigned short previousHashHistory,
-                           short delta);
-void PDFCM_cycle(AccessStat *L2Data);
-
 unsigned short StateHashHistory;
 unsigned short LastMissedAddress;
 // We see our program as a state machine where one state represents
@@ -73,6 +64,21 @@ short CurrentDegree=4;
 char DegreeIsDecreasing=0;
 
 void AdaptiveDegree_Cycle(AccessStat *);
+
+// See the following, bottom page 6 and top 7
+// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.92.6198&rep=rep1&type=pdf
+unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
+{
+    unsigned short foldedBits, maskedFold;
+    unsigned short select=delta; // note: this is a cast
+    for(foldedBits=0; select;)
+    {
+        foldedBits ^= select & DELTAMASK;
+        select= select >> DELTATABLE_BITS;
+    }
+    maskedFold = (previousHashHistory << 5) & DELTAMASK;     
+    return maskedFold ^ foldedBits;
+}
 
 Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
 {
@@ -129,27 +135,13 @@ Addr MakePrediction (Addr addr, unsigned short *hashHistory,
     return addr + DeltaTable[*hashHistory].delta;
 }
 
-// See the following, bottom page 6 and top 7
-// http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.92.6198&rep=rep1&type=pdf
-unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
-{
-    unsigned short foldedBits, maskedFold;
-    unsigned short select=delta; // note: this is a cast
-    for(foldedBits=0; select;)
-    {
-        foldedBits ^= select & DELTAMASK;
-        select= select >> DELTATABLE_BITS;
-    }
-    maskedFold = (previousHashHistory << 5) & DELTAMASK;     
-    return maskedFold ^ foldedBits;
-}
 
-void AdaptiveDegree_Cycle(AccessStat *L1Data)
+void AdaptiveDegree_Cycle(AccessStat *L2Snapshot)
 {
     AdaptiveDegree_Cycles++;
     // confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
     // We use the variable below to determine determine L2 adaption degree
-    if(in_cache(L1Data->mem_addr))
+    if(in_cache(L2Snapshot->mem_addr))
         L1AccessConfidence++;
 
     //// MAX_EPOCH_CYCLES is an epoch (given number of cycles).
