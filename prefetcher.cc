@@ -15,14 +15,15 @@
 
 
 //TODO: experiment with these numbers
-#define LOOKBACK_DEGREE 8
-#define BITMASK_16 0xffff
+//TODO: set back to 8,9 if fail
+//TODO: go back to whole ints? glorious 1.04 days
 #define MAX_EPOCH_CYCLES (64*1024)
+#define BITMASK_16 0xffff
 #define MAX_DEGREES (10)   // number of different degrees
-#define DELTATABLE_BITS (9) // doesnt seem to matter much
+#define DELTATABLE_BITS (10) // doesnt seem to matter much
 #define DELTA_SIZE (1 << DELTATABLE_BITS) // multiply by 2^DELTATABLE_BITS, e.g. 1 << 1 = 2, 1 << 2 = 4, etc
 #define DELTAMASK (DELTA_SIZE - 1)
-#define HISTORYTABLE_BITS 8
+#define HISTORYTABLE_BITS 9
 #define HISTORY_TABLE_SIZE (1 << HISTORYTABLE_BITS)
 #define HISTORYTABLE_MASK (HISTORY_TABLE_SIZE - 1)
 
@@ -43,7 +44,6 @@ struct DeltaTableRecord
 };
 DeltaTableRecord * DeltaTable; 
 
-void InitializeDatastructures (void);
 Addr UpdateTables (Addr pc, Addr addr,
                    unsigned short
                    *hashHistory);       
@@ -73,12 +73,6 @@ short CurrentDegree=4;
 char DegreeIsDecreasing=0;
 
 void AdaptiveDegree_Cycle(AccessStat *);
-
-void InitializeDatastructures (void)
-{
-    HistoryTable=(historyTablerecord *) calloc(HISTORY_TABLE_SIZE, sizeof(historyTablerecord));
-    DeltaTable=(DeltaTableRecord *) calloc(DELTA_SIZE, sizeof(DeltaTableRecord));
-}
 
 Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
 {
@@ -241,8 +235,8 @@ void PDFCM_cycle(AccessStat *L2Data)
 void prefetch_init(void)
 {
     /* Called before any calls to prefetch_access. */
-    /* This is the place to initialize data structures. */
-    InitializeDatastructures();
+    HistoryTable=(historyTablerecord *) calloc(HISTORY_TABLE_SIZE, sizeof(historyTablerecord));
+    DeltaTable=(DeltaTableRecord *) calloc(DELTA_SIZE, sizeof(DeltaTableRecord));
 }
 
 int myIndex = 0;
