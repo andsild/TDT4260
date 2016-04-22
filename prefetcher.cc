@@ -1,63 +1,47 @@
-// submissions only allow one file, so this file is a result
-// of merging a header file on top of the source cpp file
-
-// this file still needs more adaption to make sense,
-// but gives a rough overview of things.
-
-// Prefetch bit / tag - request by demand of "intelligence"?
-// PDFCM : Prefetch differential finite context machine
-// PMAF: Prefetch Memory Address File
-// MSHR and PMAF are both FIFO structures
-
 #include "interface.hh"
 #include <stdio.h>
 #include <stdlib.h>
 
-
-//TODO: experiment with these numbers
-//TODO: set back to 8,9 if fail
-//TODO: go back to whole ints? glorious 1.04 days
-#define MAX_EPOCH_CYCLES (128*1024)
-#define BITMASK_16 0xffff
-#define MAX_DEGREES (10)   // number of different degrees
-#define DELTATABLE_BITS (10) // doesnt seem to matter much
-#define DELTA_SIZE (1 << DELTATABLE_BITS) // multiply by 2^DELTATABLE_BITS, e.g. 1 << 1 = 2, 1 << 2 = 4, etc
+#define MAX_EPOCH_CYCLES (64*256)
+#define BITMASK_16 0xffffffff
+#define MAX_DEGREES (13)   // number of different degrees
+#define DELTATABLE_BITS (8) // doesnt seem to matter much
+#define DELTA_SIZE (1 << DELTATABLE_BITS)
 #define DELTAMASK (DELTA_SIZE - 1)
 #define HISTORYTABLE_BITS 9
 #define HISTORY_TABLE_SIZE (1 << HISTORYTABLE_BITS)
 #define HISTORYTABLE_MASK (HISTORY_TABLE_SIZE - 1)
 
 typedef struct historyTablerecord historyTablerecord;
-struct historyTablerecord // short: 16 bits
+struct historyTablerecord
 {
-    unsigned short PC;
-    unsigned short lastAddrMiss;
-    unsigned short hashHistory;
-    char hitCount;
+    unsigned int PC; //16 bits
+    unsigned int lastAddrMiss; // 16 bits
+    unsigned int hashHistory; //16 bits
+    char hitCount; //8 bits
 };
 historyTablerecord * HistoryTable;  
 
 typedef struct DeltaTableRecord DeltaTableRecord;
 struct DeltaTableRecord
 {
-    short delta; 
+    int delta;  //16 bits
 };
-DeltaTableRecord * DeltaTable; 
+DeltaTableRecord * DeltaTable;
 
-unsigned short StateHashHistory;
-unsigned short LastMissedAddress;
+unsigned int StateHashHistory;
+unsigned int LastMissedAddress;
 // We see our program as a state machine where one state represents
 // a degree and an address
 Addr StatePrediction;
 char StateDegree=0;
 
-
-unsigned short AdaptiveDegree_Cycles=0;
-short L1AccessConfidence=0;
-short FormerL1AccessConfidence=0;
-short DegreeList[MAX_DEGREES]= {0,1,2,3,4,6,8,12,16,24};
-short CurrentDegreeIndex=4;
-short CurrentDegree=4;
+unsigned int AdaptiveDegree_Cycles=0;
+int EpochConfidence=0;
+int FormerEpochConfidence=0;
+int DegreeList[MAX_DEGREES]= {0,1,2,3,4,6,8,12,16,24,32,48,64};
+int CurrentDegreeIndex=4;
+int CurrentDegree=4;
 // Adaptions mean that changes will either raise the current degree 
 // or lower it at the end of an epoch.
 // This confidenceer remembers: (0 = increasing)
@@ -67,10 +51,10 @@ void AdaptiveDegree_Cycle(AccessStat *);
 
 // See the following, bottom page 6 and top 7
 // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.92.6198&rep=rep1&type=pdf
-unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short delta)
+unsigned int CalculateHistoryMask (unsigned int previousHashHistory, int delta)
 {
-    unsigned short foldedBits, maskedFold;
-    unsigned short select=delta; // note: this is a cast
+    unsigned int foldedBits, maskedFold;
+    unsigned int select=delta; // note: this is a cast
     for(foldedBits=0; select;)
     {
         foldedBits ^= select & DELTAMASK;
@@ -80,12 +64,12 @@ unsigned short CalculateHistoryMask (unsigned short previousHashHistory, short d
     return maskedFold ^ foldedBits;
 }
 
-Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
+Addr UpdateTables (Addr pc, Addr addr, unsigned int *hashHistory)
 {
-    unsigned short currentHistory;
+    unsigned int currentHistory;
     unsigned int index = pc & HISTORYTABLE_MASK;
-    unsigned short previousAddress = HistoryTable[index].lastAddrMiss;
-    unsigned short previousHashHistory = HistoryTable[index].hashHistory;
+    unsigned int previousAddress = HistoryTable[index].lastAddrMiss;
+    unsigned int previousHashHistory = HistoryTable[index].hashHistory;
     char confidence = HistoryTable[index].hitCount;
 
     if (HistoryTable[index].PC!=((pc>>HISTORYTABLE_BITS) & BITMASK_16))
@@ -98,15 +82,7 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
         return 0;
     }
     // compute deltas & update confidence Tick
-    short predictedDelta = DeltaTable[previousHashHistory].delta;
-    short actualDelta = (addr-previousAddress) & BITMASK_16;
-    if (actualDelta==predictedDelta)
-    {
-        if (confidence<3) { confidence++; }
-    }
-    else {
-        if (confidence>0) { confidence--; }
-    }
+    int actualDelta = (addr-previousAddress) & BITMASK_16;
 
     *hashHistory   = currentHistory   = CalculateHistoryMask(previousHashHistory, actualDelta);
     // write HistoryTable record
@@ -117,18 +93,14 @@ Addr UpdateTables (Addr pc, Addr addr, unsigned short *hashHistory)
     // update DeltaTable record
     DeltaTable[previousHashHistory].delta = actualDelta;
 
-    if (confidence<2)
-        return 0;
-    else
-        // predict a new delta using the new hashHistory
-        return addr + DeltaTable[currentHistory].delta;
+    return addr + DeltaTable[currentHistory].delta;
 }
 
-Addr MakePrediction (Addr addr, unsigned short *hashHistory,
-                         unsigned short old_lastAddrMiss)
+Addr MakePrediction (Addr addr, unsigned int *hashHistory,
+                         unsigned int old_lastAddrMiss)
 {
     // compute delta
-    short delta = (addr-old_lastAddrMiss) & BITMASK_16;
+    int delta = (addr-old_lastAddrMiss) & BITMASK_16;
     // compute new hashHistory
     *hashHistory=CalculateHistoryMask(*hashHistory, delta);
     // predict a new delta using the new hashHistory
@@ -139,10 +111,10 @@ Addr MakePrediction (Addr addr, unsigned short *hashHistory,
 void AdaptiveDegree_Cycle(AccessStat *L2Snapshot)
 {
     AdaptiveDegree_Cycles++;
-    // confidence is how many references there were to prefetched blocks to  L1 in the previous cycle
+    // confidence is how many references there were to prefetched blocks in the previous cycle
     // We use the variable below to determine determine L2 adaption degree
     if(in_cache(L2Snapshot->mem_addr))
-        L1AccessConfidence++;
+        EpochConfidence++;
 
     //// MAX_EPOCH_CYCLES is an epoch (given number of cycles).
     //// In an epoch, we define success on whether or not we have many hits to prefetches (confidence)
@@ -151,7 +123,7 @@ void AdaptiveDegree_Cycle(AccessStat *L2Snapshot)
     if (AdaptiveDegree_Cycles>MAX_EPOCH_CYCLES)
     {
        AdaptiveDegree_Cycles=0;
-       if (L1AccessConfidence<FormerL1AccessConfidence)
+       if (EpochConfidence<FormerEpochConfidence)
            DegreeIsDecreasing=!DegreeIsDecreasing;
        if (!DegreeIsDecreasing)
        {
@@ -164,21 +136,18 @@ void AdaptiveDegree_Cycle(AccessStat *L2Snapshot)
                CurrentDegreeIndex--;
         }
        CurrentDegree=DegreeList[CurrentDegreeIndex];
-       FormerL1AccessConfidence=L1AccessConfidence;
-       L1AccessConfidence=0;
+       FormerEpochConfidence=EpochConfidence;
+       EpochConfidence=0;
     }
 }
 
 void PDFCM_cycle(AccessStat *L2Data)
 {
     Addr predicted_address;
-    unsigned short hashHistory=StateHashHistory;
+    unsigned int hashHistory=StateHashHistory;
 
-    if (((L2Data->miss == 1  && ! in_cache(L2Data->mem_addr)) ||
-             get_prefetch_bit(L2Data->mem_addr)!=0)  )
+    if (((L2Data->miss == 1  && ! in_mshr_queue(L2Data->mem_addr)) ))
     {
-        if(L2Data->miss == 0)
-            clear_prefetch_bit(L2Data->mem_addr);
 
         predicted_address = UpdateTables(L2Data->pc,
                             L2Data->mem_addr, &hashHistory);
@@ -187,15 +156,12 @@ void PDFCM_cycle(AccessStat *L2Data)
         {
             // issue prefetch (if not filtered)
             if (predicted_address && predicted_address < MAX_PHYS_MEM_ADDR  &&
-                    predicted_address!=L2Data->mem_addr &&
-                    ! get_prefetch_bit(predicted_address)
+                    predicted_address!=L2Data->mem_addr
                     && !in_mshr_queue(predicted_address & BITMASK_16) &&
                     ! in_cache(predicted_address)
             )
-            {
                 issue_prefetch(predicted_address);
-                set_prefetch_bit(predicted_address);
-            }
+
             if (predicted_address)
             {
                 StateHashHistory=hashHistory;
@@ -211,12 +177,10 @@ void PDFCM_cycle(AccessStat *L2Data)
         // issue prefetch (if not filtered)
         if (predicted_address && predicted_address < MAX_PHYS_MEM_ADDR 
         && predicted_address!=StatePrediction 
-        && !get_prefetch_bit(predicted_address)
         && !in_mshr_queue(predicted_address & BITMASK_16) 
         && !in_cache(predicted_address))
         {
             issue_prefetch(predicted_address);
-            set_prefetch_bit(predicted_address);
         }
         LastMissedAddress=StatePrediction & BITMASK_16;
         StatePrediction=predicted_address;
